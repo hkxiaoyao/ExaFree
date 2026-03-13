@@ -217,6 +217,12 @@ def parse_args() -> argparse.Namespace:
         help="Playwright 浏览器代理地址（可选），例如 http://127.0.0.1:7890",
     )
     parser.add_argument(
+        "--browser-mode",
+        choices=("headless", "headful"),
+        default="",
+        help="Playwright 浏览器模式（默认读取系统设置 exa_browser_mode）",
+    )
+    parser.add_argument(
         "--timeout-ms",
         type=int,
         default=120000,
@@ -280,6 +286,7 @@ def main() -> int:
         proxy=(args.browser_proxy or "").strip(),
         timeout_ms=max(15000, int(args.timeout_ms)),
         log_callback=_logger,
+        headless=(args.browser_mode == "headless") if args.browser_mode else None,
     )
 
     result = automation.register_and_setup(
@@ -297,6 +304,8 @@ def main() -> int:
 
     if not result.get("success"):
         print("FINAL_SUCCESS: False")
+        if result.get("error_code"):
+            print(f"ERROR_CODE: {result.get('error_code')}")
         print(f"ERROR: {result.get('error')}")
         return 1
 
