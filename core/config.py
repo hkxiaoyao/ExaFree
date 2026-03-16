@@ -344,15 +344,14 @@ class ConfigManager:
             session=session_config
         )
 
-    def _resolve_yaml_path(self) -> Optional[Path]:
+    def _resolve_yaml_path(self, allow_default: bool = False) -> Optional[Path]:
         env_path = os.getenv("CONFIG_FILE", "").strip()
         if env_path:
             return Path(env_path)
         if self.yaml_path and str(self.yaml_path):
             return self.yaml_path
-        default_path = Path("data") / "settings.yaml"
-        if default_path.exists():
-            return default_path
+        if allow_default:
+            return Path("data") / "settings.yaml"
         return None
 
     def _load_yaml_file(self, path: Path, required: bool) -> dict:
@@ -360,7 +359,14 @@ class ConfigManager:
             msg = f"[WARN] 未找到配置文件: {path}"
             print(msg)
             if required:
-                raise RuntimeError(f"配置文件不存在: {path}")
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    with path.open("w", encoding="utf-8") as f:
+                        yaml.safe_dump({}, f, allow_unicode=False, sort_keys=False)
+                    print(f"[INFO] 已创建默认配置文件: {path}")
+                    return {}
+                except Exception as e:
+                    raise RuntimeError(f"配置文件不存在且创建失败: {e}")
             return {}
         try:
             with path.open("r", encoding="utf-8") as f:
@@ -380,11 +386,13 @@ class ConfigManager:
 
     def _load_yaml(self) -> dict:
         """从配置文件或数据库加载配置（允许空配置）。"""
-        yaml_path = self._resolve_yaml_path()
-        if yaml_path:
-            self.yaml_path = yaml_path
-            required = bool(os.getenv("CONFIG_FILE", "").strip())
-            return self._load_yaml_file(yaml_path, required)
+        env_path = os.getenv("CONFIG_FILE", "").strip()
+        if env_path:
+            self.yaml_path = Path(env_path)
+            return self._load_yaml_file(self.yaml_path, required=True)
+
+        if self.yaml_path and str(self.yaml_path):
+            return self._load_yaml_file(self.yaml_path, required=False)
 
         if storage.is_database_enabled():
             try:
@@ -406,8 +414,9 @@ class ConfigManager:
                 print(f"[ERROR] 数据库加载失败: {e}")
                 raise RuntimeError(f"数据库加载失败: {e}")
 
-        print("[ERROR] 未启用数据库且未找到配置文件")
-        raise RuntimeError("未配置 DATABASE_URL 且未提供 CONFIG_FILE，应用无法启动")
+        default_path = Path("data") / "settings.yaml"
+        self.yaml_path = default_path
+        return self._load_yaml_file(default_path, required=True)
 
     def _generate_secret(self) -> str:
         """生成随机密钥"""
@@ -463,7 +472,7 @@ class ConfigManager:
             raise ValueError(f"配置验证失败: {str(e)}")
 
         # 验证通过后才保存
-        yaml_path = self._resolve_yaml_path()
+        yaml_path = self._resolve_yaml_path(allow_default=not storage.is_database_enabled())
         if yaml_path:
             try:
                 self._save_yaml_file(yaml_path, data)
